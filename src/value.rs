@@ -142,6 +142,7 @@ impl Value {
     }
 
     /// OCaml Some value
+    /// `stdlib` definition: https://github.com/ocaml/ocaml/blob/4e6e9123287405a08b349c3e0e12d53000e8534d/stdlib/option.mli#L24
     pub fn some<V: ToValue>(v: V) -> Value {
         caml_frame!(|x| {
             x.0 = unsafe { core::alloc::caml_alloc(1, 0) };
@@ -562,6 +563,54 @@ impl Value {
             let ptr1 = vec1.as_ptr();
             mem::forget(vec1);
             return Value::ptr(ptr1.offset(1));
+        }
+    }
+}
+
+impl<T: FromValue> FromValue for Option<T> {
+    fn from_value(v: Value) -> Self {
+        if v.is_long() && v.i32_val() == 0 {
+            None
+        } else if v.is_block() && unsafe { wosize_val!(v.0) } == 1 {
+            match v.tag() {
+                Tag::Tag(0) => Some(T::from_value(v.field(0))),
+                _ => panic!("unexpected ocaml value as option"),
+            }
+        } else {
+            panic!("unexpected ocaml value as option")
+        }
+    }
+}
+
+impl<T: ToValue> ToValue for Option<T> {
+    fn to_value(&self) -> Value {
+        match self {
+            Some(value) => Value::some(value.to_value()),
+            None => Value::none(),
+        }
+    }
+}
+
+/// OCaml `stdlib` definition: https://github.com/ocaml/ocaml/blob/4e6e9123287405a08b349c3e0e12d53000e8534d/stdlib/result.mli#L25
+impl<T: FromValue, E: FromValue> FromValue for Result<T, E> {
+    fn from_value(v: Value) -> Self {
+        if v.is_block() && unsafe { wosize_val!(v.0) } == 1 {
+            match v.tag() {
+                Tag::Tag(0) => Ok(T::from_value(v.field(0))),
+                Tag::Tag(1) => Err(E::from_value(v.field(1))),
+                _ => panic!("unexpected ocaml value as variants of result"),
+            }
+        } else {
+            panic!("unexpected ocaml value as result")
+        }
+    }
+}
+
+impl<T: ToValue, E: ToValue> ToValue for Result<T, E> {
+    fn to_value(&self) -> Value {
+        match self {
+            Ok(value) => Value::variant(0, Some(value.to_value())),
+            Err(value) => Value::variant(1, Some(value.to_value())),
         }
     }
 }
